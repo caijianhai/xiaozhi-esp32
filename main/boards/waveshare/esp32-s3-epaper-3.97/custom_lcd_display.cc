@@ -451,6 +451,29 @@ void CustomEpdDisplay::SetupUI() {
     date_label_ = lv_label_create(screen);
     lv_label_set_text(date_label_, "");
     lv_obj_align(date_label_, LV_ALIGN_TOP_MID, 0, 200);
+
+    climate_label_ = lv_label_create(screen);
+    lv_label_set_text(climate_label_, "");
+    lv_obj_align(climate_label_, LV_ALIGN_TOP_MID, 0, 240);
+}
+
+// Only redraws when the rounded value changes, to avoid needless e-paper refreshes.
+void CustomEpdDisplay::SetIndoorClimate(float temperature, float humidity) {
+    if (climate_label_ == nullptr) {
+        return;
+    }
+    int t = (int)(temperature + (temperature >= 0 ? 0.5f : -0.5f));
+    int h = (int)(humidity + 0.5f);
+    int key = t * 1000 + h;
+    if (key == last_climate_key_) {
+        return;
+    }
+    last_climate_key_ = key;
+
+    char text[48];
+    snprintf(text, sizeof(text), "室温 %d度    湿度 %d%%", t, h);
+    DisplayLockGuard lock(this);
+    lv_label_set_text(climate_label_, text);
 }
 
 // Called once per second by the application; only touches the panel when the minute changes.

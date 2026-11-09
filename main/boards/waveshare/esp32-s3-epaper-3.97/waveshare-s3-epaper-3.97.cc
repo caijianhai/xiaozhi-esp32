@@ -20,6 +20,10 @@
 
 #define TAG "waveshare_epaper_3_97"
 
+#define SHTC3_I2C_ADDR 0x70
+// The sensor sits next to the ESP32 and reads warm; Waveshare's demo subtracts 4°C.
+#define SHTC3_TEMP_OFFSET 4.0f
+
 class Pmic : public Axp2101 {
 public:
     Pmic(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : Axp2101(i2c_bus, addr) {
@@ -61,6 +65,10 @@ private:
     Button boot_button_;
     Button pwr_button_;
     CustomEpdDisplay* display_;
+    i2c_master_dev_handle_t shtc3_dev_ = nullptr;
+    volatile float last_temperature_ = 0;
+    volatile float last_humidity_ = 0;
+    volatile bool has_climate_ = false;
     PowerSaveTimer* power_save_timer_;
 
     void InitializePowerSaveTimer() {
@@ -85,6 +93,77 @@ private:
         i2c_bus_cfg.trans_queue_depth = 0;
         i2c_bus_cfg.flags.enable_internal_pullup = 1;
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+
+        if (i2c_master_probe(i2c_bus_, SHTC3_I2C_ADDR, 100) == ESP_OK) {
+            i2c_device_config_t dev_cfg = {};
+            dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+            dev_cfg.device_address = SHTC3_I2C_ADDR;
+            dev_cfg.scl_speed_hz = 100000;
+            if (i2c_master_bus_add_device(i2c_bus_, &dev_cfg, &shtc3_dev_) != ESP_OK) {
+                shtc3_dev_ = nullptr;
+            }
+        }
+        ESP_LOGI(TAG, "SHTC3 %s", shtc3_dev_ ? "found" : "not found");
+    }
+
+    static uint8_t Shtc3Crc(const uint8_t* data) {
+        uint8_t crc = 0xFF;
+        for (int i = 0; i < 2; i++) {
+            crc ^= data[i];
+            for (int b = 0; b < 8; b++) {
+                crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+            }
+        }
+        return crc;
+    }
+
+    static esp_err_t Shtc3Command(i2c_master_dev_handle_t dev, uint16_t cmd) {
+        uint8_t buf[2] = {(uint8_t)(cmd >> 8), (uint8_t)(cmd & 0xFF)};
+        return i2c_master_transmit(dev, buf, 2, 100);
+    }
+
+    bool ReadShtc3(float& temperature, float& humidity) {
+        if (shtc3_dev_ == nullptr) {
+            return false;
+        }
+        Shtc3Command(shtc3_dev_, 0x3517);  // wake up
+        vTaskDelay(pdMS_TO_TICKS(1));
+        bool ok = false;
+        if (Shtc3Command(shtc3_dev_, 0x7866) == ESP_OK) {  // measure, T first, no clock stretching
+            vTaskDelay(pdMS_TO_TICKS(20));
+            uint8_t d[6] = {};
+            if (i2c_master_receive(shtc3_dev_, d, sizeof(d), 100) == ESP_OK &&
+                Shtc3Crc(d) == d[2] && Shtc3Crc(d + 3) == d[5]) {
+                uint16_t raw_t = (d[0] << 8) | d[1];
+                uint16_t raw_h = (d[3] << 8) | d[4];
+                temperature = 175.0f * raw_t / 65536.0f - 45.0f - SHTC3_TEMP_OFFSET;
+                humidity = 100.0f * raw_h / 65536.0f;
+                ok = true;
+            }
+        }
+        Shtc3Command(shtc3_dev_, 0xB098);  // sleep
+        return ok;
+    }
+
+    void StartClimateTask() {
+        if (shtc3_dev_ == nullptr) {
+            return;
+        }
+        xTaskCreate(
+            [](void* arg) {
+                auto self = static_cast<WaveshareEsp32s3ePaper3inch97*>(arg);
+                while (true) {
+                    float t, h;
+                    if (self->ReadShtc3(t, h)) {
+                        self->last_temperature_ = t;
+                        self->last_humidity_ = h;
+                        self->has_climate_ = true;
+                        self->display_->SetIndoorClimate(t, h);
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(60 * 1000));
+                }
+            },
+            "climate", 3072, this, 1, nullptr);
     }
 
     void InitializeButtons() {
@@ -118,6 +197,19 @@ private:
                                EnterWifiConfigMode();
                                return true;
                            });
+
+        mcp_server.AddTool(
+            "self.sensor.get_indoor_climate",
+            "读取板载传感器测得的室内温度(摄氏度)和湿度(%)。用户问“现在几度/室温多少/冷不冷/湿度多少”时调用。",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                if (!has_climate_) {
+                    return std::string("{\"error\":\"sensor not available\"}");
+                }
+                char buf[96];
+                snprintf(buf, sizeof(buf), "{\"temperature_c\":%.1f,\"humidity_percent\":%.0f}",
+                         (float)last_temperature_, (float)last_humidity_);
+                return std::string(buf);
+            });
 
         mcp_server.AddTool(
             "self.disp.set_rotation",
@@ -165,6 +257,7 @@ public:
         InitializeButtons();
         InitializeTools();
         InitializeEpdDisplay();
+        StartClimateTask();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
