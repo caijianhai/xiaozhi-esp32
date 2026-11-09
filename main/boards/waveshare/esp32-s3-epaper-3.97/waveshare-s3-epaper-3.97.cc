@@ -64,7 +64,8 @@ private:
     PowerSaveTimer* power_save_timer_;
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 100, 300);
+        // Never auto power off: stay on and keep listening for the wake word.
+        power_save_timer_ = new PowerSaveTimer(-1, 100, -1);
         power_save_timer_->OnShutdownRequest([this]() {
             GetDisplay()->SetChatMessage("system", "OFF");
             vTaskDelay(pdMS_TO_TICKS(1000));

@@ -6,7 +6,9 @@
         {
             "name": "esp32-s3-epaper-3.97",
             "sdkconfig_append": [
-                "CONFIG_USE_WECHAT_MESSAGE_STYLE=n"
+                "CONFIG_USE_WECHAT_MESSAGE_STYLE=n",
+                "CONFIG_USE_MULTILINE_CHAT_MESSAGE=y",
+                "CONFIG_LV_FONT_MONTSERRAT_48=y"
             ]
         }
     ]
