@@ -16,8 +16,8 @@
 #define BUFF_SIZE (EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT * BYTES_PER_PIXEL)
 
 // Screen rotation is stored in NVS ("display" / "rotation"): 0, 90, 180 or 270.
-// 90 and 270 are portrait (480x800). Default is portrait.
-#define EPD_DEFAULT_ROTATION 90
+// 90 and 270 are portrait (480x800). Default 270 = portrait with USB-C at the bottom.
+#define EPD_DEFAULT_ROTATION 270
 
 static int LoadEpdRotation() {
     Settings settings("display", false);
