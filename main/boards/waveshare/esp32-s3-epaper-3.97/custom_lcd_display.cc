@@ -3,10 +3,12 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <stdio.h>
+#include <string.h>
 #include <vector>
 #include "board.h"
 #include "config.h"
 #include "esp_lvgl_port.h"
+#include "lvgl_theme.h"
 #include "settings.h"
 
 #define TAG "CustomEpdDisplay"
@@ -431,3 +433,82 @@ void CustomEpdDisplay::DrawRotatedPixel(int x, int y, uint8_t color) {
     }
     EPD_DrawColorPixel(px, py, color);
 }
+
+void CustomEpdDisplay::SetupUI() {
+    LcdDisplay::SetupUI();
+    DisplayLockGuard lock(this);
+    if (chat_message_label_ != nullptr) {
+        // A question + answer block reads better left-aligned.
+        lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_LEFT, 0);
+    }
+}
+
+// Trim the beginning of the text (UTF-8 safe) until it fits above the status bar.
+std::string CustomEpdDisplay::FitTranscript(const std::string& text) {
+    DisplayLockGuard lock(this);
+    if (chat_message_label_ == nullptr || bottom_bar_ == nullptr || current_theme_ == nullptr) {
+        return text;
+    }
+    auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    const lv_font_t* font = lvgl_theme->text_font()->font();
+    lv_coord_t max_width = width_ - lvgl_theme->spacing(8);  // same as the label width
+    lv_coord_t top = (top_bar_ != nullptr) ? lv_obj_get_height(top_bar_) : 0;
+    lv_coord_t max_height = height_ - top - lvgl_theme->spacing(8) - 8;
+    if (max_width <= 0 || max_height <= 0) {
+        return text;
+    }
+
+    std::string out = text;
+    bool trimmed = false;
+    for (int i = 0; i < 40; i++) {
+        std::string candidate = trimmed ? "..." + out : out;
+        lv_point_t size;
+        lv_text_get_size(&size, candidate.c_str(), font, 0, 0, max_width, LV_TEXT_FLAG_NONE);
+        if (size.y <= max_height) {
+            return candidate;
+        }
+        // Drop roughly 10% from the front, then advance to a UTF-8 boundary.
+        size_t cut = out.size() / 10 + 1;
+        while (cut < out.size() && (static_cast<unsigned char>(out[cut]) & 0xC0) == 0x80) {
+            cut++;
+        }
+        if (cut >= out.size()) {
+            break;
+        }
+        out.erase(0, cut);
+        trimmed = true;
+    }
+    return "..." + out;
+}
+
+void CustomEpdDisplay::SetChatMessage(const char* role, const char* content) {
+    bool empty = (content == nullptr || content[0] == '\0');
+    if (strcmp(role, "user") == 0) {
+        if (empty) {
+            return;
+        }
+        // A new question replaces the previous question and answer.
+        transcript_ = std::string("问：") + content;
+        answer_started_ = false;
+    } else if (strcmp(role, "assistant") == 0) {
+        if (empty) {
+            return;
+        }
+        transcript_ += answer_started_ ? "" : "\n";
+        transcript_ += content;
+        answer_started_ = true;
+    } else {
+        // System messages: ignore the empty "clear" at the end of a conversation so the
+        // last answer stays visible; show real system text (errors, "OFF") as-is.
+        if (empty) {
+            return;
+        }
+        LcdDisplay::SetChatMessage(role, content);
+        return;
+    }
+    std::string fitted = FitTranscript(transcript_);
+    LcdDisplay::SetChatMessage(role, fitted.c_str());
+}
+
+// Called when the device returns to idle; keep the last answer on screen instead.
+void CustomEpdDisplay::ClearChatMessages() {}

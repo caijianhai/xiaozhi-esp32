@@ -4,6 +4,8 @@
 #include <driver/gpio.h>
 #include "lcd_display.h"
 
+#include <string>
+
 /* Display color */
 typedef enum {
     DRIVER_COLOR_WHITE = 0xff,
@@ -34,6 +36,11 @@ public:
     void EPD_Display(); /* 刷buffer到墨水屏 */
     void EPD_Sleep();
 
+    // Keep the last question + full answer on screen until the next question.
+    virtual void SetupUI() override;
+    virtual void SetChatMessage(const char* role, const char* content) override;
+    virtual void ClearChatMessages() override;
+
     /*快速刷新*/
     void EPD_DisplayPartBaseImage();
     void EPD_Init_Partial();
@@ -46,6 +53,10 @@ private:
     const int Width;
     const int Height;
     const int rotation_;
+    std::string transcript_;
+    bool answer_started_ = false;
+
+    std::string FitTranscript(const std::string& text);
     spi_device_handle_t spi;
     uint8_t* buffer = NULL;
 
