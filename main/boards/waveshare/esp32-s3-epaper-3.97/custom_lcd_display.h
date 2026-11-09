@@ -34,10 +34,6 @@ public:
     void EPD_Display(); /* 刷buffer到墨水屏 */
     void EPD_Sleep();
 
-    virtual void SetupUI() override;
-    virtual void UpdateStatusBar(bool update_all = false) override;
-    void SetIndoorClimate(float temperature, float humidity);
-
     /*快速刷新*/
     void EPD_DisplayPartBaseImage();
     void EPD_Init_Partial();
@@ -50,11 +46,6 @@ private:
     const int Width;
     const int Height;
     const int rotation_;
-    lv_obj_t* clock_label_ = nullptr;
-    lv_obj_t* date_label_ = nullptr;
-    lv_obj_t* climate_label_ = nullptr;
-    int last_climate_key_ = -100000;
-    int last_clock_min_ = -1;
     spi_device_handle_t spi;
     uint8_t* buffer = NULL;
 

@@ -66,14 +66,12 @@ private:
     Button pwr_button_;
     CustomEpdDisplay* display_;
     i2c_master_dev_handle_t shtc3_dev_ = nullptr;
-    volatile float last_temperature_ = 0;
-    volatile float last_humidity_ = 0;
-    volatile bool has_climate_ = false;
     PowerSaveTimer* power_save_timer_;
 
     void InitializePowerSaveTimer() {
-        // Never auto power off: stay on and keep listening for the wake word.
-        power_save_timer_ = new PowerSaveTimer(-1, 100, -1);
+        // On battery only: power off after 20 minutes idle (wake word works until then).
+        // When powered over USB the timer is disabled, so the device never powers off.
+        power_save_timer_ = new PowerSaveTimer(-1, 100, 20 * 60);
         power_save_timer_->OnShutdownRequest([this]() {
             GetDisplay()->SetChatMessage("system", "OFF");
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -145,27 +143,6 @@ private:
         return ok;
     }
 
-    void StartClimateTask() {
-        if (shtc3_dev_ == nullptr) {
-            return;
-        }
-        xTaskCreate(
-            [](void* arg) {
-                auto self = static_cast<WaveshareEsp32s3ePaper3inch97*>(arg);
-                while (true) {
-                    float t, h;
-                    if (self->ReadShtc3(t, h)) {
-                        self->last_temperature_ = t;
-                        self->last_humidity_ = h;
-                        self->has_climate_ = true;
-                        self->display_->SetIndoorClimate(t, h);
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(60 * 1000));
-                }
-            },
-            "climate", 3072, this, 1, nullptr);
-    }
-
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -200,21 +177,21 @@ private:
 
         mcp_server.AddTool(
             "self.sensor.get_indoor_climate",
-            "读取板载传感器测得的室内温度(摄氏度)和湿度(%)。用户问“现在几度/室温多少/冷不冷/湿度多少”时调用。",
+            "读取板载传感器测得的室内温度(摄氏度)和湿度(%)，传感器靠近芯片，数值仅供参考。用户问“现在几度/室温多少/冷不冷/湿度多少”时调用。",
             PropertyList(), [this](const PropertyList&) -> ReturnValue {
-                if (!has_climate_) {
+                float t, h;
+                if (!ReadShtc3(t, h)) {
                     return std::string("{\"error\":\"sensor not available\"}");
                 }
                 char buf[96];
-                snprintf(buf, sizeof(buf), "{\"temperature_c\":%.1f,\"humidity_percent\":%.0f}",
-                         (float)last_temperature_, (float)last_humidity_);
+                snprintf(buf, sizeof(buf), "{\"temperature_c\":%.1f,\"humidity_percent\":%.0f}", t, h);
                 return std::string(buf);
             });
 
         mcp_server.AddTool(
             "self.disp.set_rotation",
-            "设置墨水屏显示方向，设置后设备会自动重启生效。rotation: 90=竖屏, 270=竖屏(倒过来), "
-            "0=横屏, 180=横屏(倒过来)。用户说“竖屏”“横屏”“屏幕倒了/上下颠倒/旋转屏幕”时调用。",
+            "设置墨水屏显示方向，设置后设备会自动重启生效。rotation: 270=竖屏(默认, Type-C口朝下), "
+            "90=竖屏(倒过来), 0=横屏, 180=横屏(倒过来)。用户说“竖屏”“横屏”“屏幕倒了/上下颠倒/旋转屏幕”时调用。",
             PropertyList({Property("rotation", kPropertyTypeInteger, 0, 270)}),
             [](const PropertyList& properties) -> ReturnValue {
                 int rotation = properties["rotation"].value<int>();
@@ -257,7 +234,6 @@ public:
         InitializeButtons();
         InitializeTools();
         InitializeEpdDisplay();
-        StartClimateTask();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

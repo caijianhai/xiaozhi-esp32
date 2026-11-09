@@ -3,7 +3,6 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <stdio.h>
-#include <time.h>
 #include <vector>
 #include "board.h"
 #include "config.h"
@@ -431,78 +430,4 @@ void CustomEpdDisplay::DrawRotatedPixel(int x, int y, uint8_t color) {
             break;
     }
     EPD_DrawColorPixel(px, py, color);
-}
-
-// Big clock + date shown in the upper part of the screen.
-void CustomEpdDisplay::SetupUI() {
-    LcdDisplay::SetupUI();
-
-    DisplayLockGuard lock(this);
-    lv_obj_t* screen = lv_screen_active();
-
-    clock_label_ = lv_label_create(screen);
-    lv_obj_set_style_text_font(clock_label_, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_transform_pivot_x(clock_label_, lv_pct(50), 0);
-    lv_obj_set_style_transform_pivot_y(clock_label_, lv_pct(50), 0);
-    lv_obj_set_style_transform_scale(clock_label_, 512, 0);  // 2x
-    lv_label_set_text(clock_label_, "--:--");
-    lv_obj_align(clock_label_, LV_ALIGN_TOP_MID, 0, 110);
-
-    date_label_ = lv_label_create(screen);
-    lv_label_set_text(date_label_, "");
-    lv_obj_align(date_label_, LV_ALIGN_TOP_MID, 0, 200);
-
-    climate_label_ = lv_label_create(screen);
-    lv_label_set_text(climate_label_, "");
-    lv_obj_align(climate_label_, LV_ALIGN_TOP_MID, 0, 240);
-}
-
-// Only redraws when the rounded value changes, to avoid needless e-paper refreshes.
-void CustomEpdDisplay::SetIndoorClimate(float temperature, float humidity) {
-    if (climate_label_ == nullptr) {
-        return;
-    }
-    int t = (int)(temperature + (temperature >= 0 ? 0.5f : -0.5f));
-    int h = (int)(humidity + 0.5f);
-    int key = t * 1000 + h;
-    if (key == last_climate_key_) {
-        return;
-    }
-    last_climate_key_ = key;
-
-    char text[48];
-    snprintf(text, sizeof(text), "室温 %d度    湿度 %d%%", t, h);
-    DisplayLockGuard lock(this);
-    lv_label_set_text(climate_label_, text);
-}
-
-// Called once per second by the application; only touches the panel when the minute changes.
-void CustomEpdDisplay::UpdateStatusBar(bool update_all) {
-    LcdDisplay::UpdateStatusBar(update_all);
-    if (clock_label_ == nullptr) {
-        return;
-    }
-
-    time_t now = time(NULL);
-    struct tm tm_now;
-    localtime_r(&now, &tm_now);
-    if (tm_now.tm_year < 2025 - 1900) {
-        return;  // time not synced yet
-    }
-    int cur_min = tm_now.tm_yday * 1440 + tm_now.tm_hour * 60 + tm_now.tm_min;
-    if (!update_all && cur_min == last_clock_min_) {
-        return;
-    }
-    last_clock_min_ = cur_min;
-
-    static const char* const kWeekdays[] = {"日", "一", "二", "三", "四", "五", "六"};
-    char time_str[8];
-    char date_str[48];
-    strftime(time_str, sizeof(time_str), "%H:%M", &tm_now);
-    snprintf(date_str, sizeof(date_str), "%d月%d日 星期%s", tm_now.tm_mon + 1, tm_now.tm_mday,
-             kWeekdays[tm_now.tm_wday]);
-
-    DisplayLockGuard lock(this);
-    lv_label_set_text(clock_label_, time_str);
-    lv_label_set_text(date_label_, date_str);
 }
