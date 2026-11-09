@@ -16,6 +16,7 @@
 #include "codecs/box_audio_codec.h"
 #include "i2c_device.h"
 #include "power_save_timer.h"
+#include "settings.h"
 
 #define TAG "waveshare_epaper_3_97"
 
@@ -116,6 +117,27 @@ private:
                                EnterWifiConfigMode();
                                return true;
                            });
+
+        mcp_server.AddTool(
+            "self.disp.set_rotation",
+            "设置墨水屏显示方向，设置后设备会自动重启生效。rotation: 90=竖屏, 270=竖屏(倒过来), "
+            "0=横屏, 180=横屏(倒过来)。用户说“竖屏”“横屏”“屏幕倒了/上下颠倒/旋转屏幕”时调用。",
+            PropertyList({Property("rotation", kPropertyTypeInteger, 0, 270)}),
+            [](const PropertyList& properties) -> ReturnValue {
+                int rotation = properties["rotation"].value<int>();
+                rotation = ((rotation + 45) / 90 % 4) * 90;
+                {
+                    Settings settings("display", true);
+                    settings.SetInt("rotation", rotation);
+                }
+                ESP_LOGI(TAG, "Set display rotation to %d, rebooting", rotation);
+                auto& app = Application::GetInstance();
+                app.Schedule([&app]() {
+                    vTaskDelay(pdMS_TO_TICKS(3000));
+                    app.Reboot();
+                });
+                return true;
+            });
     }
 
     void InitializeEpdDisplay() {

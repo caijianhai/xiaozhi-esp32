@@ -14,6 +14,19 @@
 #define BYTES_PER_PIXEL (LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_RGB565))
 #define BUFF_SIZE (EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT * BYTES_PER_PIXEL)
 
+// Screen rotation is stored in NVS ("display" / "rotation"): 0, 90, 180 or 270.
+// 90 and 270 are portrait (480x800). Default is portrait.
+#define EPD_DEFAULT_ROTATION 90
+
+static int LoadEpdRotation() {
+    Settings settings("display", false);
+    int rotation = settings.GetInt("rotation", EPD_DEFAULT_ROTATION);
+    if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
+        rotation = EPD_DEFAULT_ROTATION;
+    }
+    return rotation;
+}
+
 void CustomEpdDisplay::lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* color_p) {
     assert(disp != NULL);
     CustomEpdDisplay* driver = (CustomEpdDisplay*)lv_display_get_user_data(disp);
@@ -22,7 +35,7 @@ void CustomEpdDisplay::lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, 
     for (int y = area->y1; y <= area->y2; y++) {
         for (int x = area->x1; x <= area->x2; x++) {
             uint8_t color = (*buffer < 0x7fff) ? DRIVER_COLOR_BLACK : DRIVER_COLOR_WHITE;
-            driver->EPD_DrawColorPixel(x, y, color);
+            driver->DrawRotatedPixel(x, y, color);
             buffer++;
         }
     }
@@ -33,10 +46,13 @@ void CustomEpdDisplay::lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, 
 CustomEpdDisplay::CustomEpdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                                    int width, int height, int offset_x, int offset_y, bool mirror_x,
                                    bool mirror_y, bool swap_xy, custom_epd_spi_t _epd_spi_data)
-    : LcdDisplay(panel_io, panel, width, height),
+    : LcdDisplay(panel_io, panel, (LoadEpdRotation() % 180) ? height : width,
+                 (LoadEpdRotation() % 180) ? width : height),
       epd_spi_data(_epd_spi_data),
       Width(width),
-      Height(height) {
+      Height(height),
+      rotation_(LoadEpdRotation()) {
+    ESP_LOGI(TAG, "Display rotation: %d", rotation_);
     ESP_LOGI(TAG, "Initialize SPI");
     spi_port_init();
     spi_gpio_init();
@@ -52,7 +68,7 @@ CustomEpdDisplay::CustomEpdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_p
 
     buffer = (uint8_t*)heap_caps_malloc(epd_spi_data.buffer_len, MALLOC_CAP_SPIRAM);
     assert(buffer);
-    display_ = lv_display_create(width, height); /* 以水平和垂直分辨率（像素）进行基本初始化 */
+    display_ = lv_display_create(width_, height_); /* 以水平和垂直分辨率（像素）进行基本初始化 */
     lv_display_set_flush_cb(display_, lvgl_flush_cb);
     lv_display_set_user_data(display_, this);
 
@@ -390,4 +406,28 @@ void CustomEpdDisplay::EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color)
     } else {
         buffer[index] &= ~(0x01 << bit);
     }
+}
+
+// Map a logical (rotated) LVGL pixel to the physical 800x480 panel buffer.
+void CustomEpdDisplay::DrawRotatedPixel(int x, int y, uint8_t color) {
+    int px, py;
+    switch (rotation_) {
+        case 90:
+            px = Width - 1 - y;
+            py = x;
+            break;
+        case 180:
+            px = Width - 1 - x;
+            py = Height - 1 - y;
+            break;
+        case 270:
+            px = y;
+            py = Height - 1 - x;
+            break;
+        default:
+            px = x;
+            py = y;
+            break;
+    }
+    EPD_DrawColorPixel(px, py, color);
 }

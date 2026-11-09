@@ -39,11 +39,13 @@ public:
     void EPD_Init_Partial();
     void EPD_DisplayPart();
     void EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color);
+    void DrawRotatedPixel(int x, int y, uint8_t color);
 
 private:
     const custom_epd_spi_t epd_spi_data;
     const int Width;
     const int Height;
+    const int rotation_;
     spi_device_handle_t spi;
     uint8_t* buffer = NULL;
 
