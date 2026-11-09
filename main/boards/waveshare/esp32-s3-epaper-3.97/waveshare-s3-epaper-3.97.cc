@@ -20,6 +20,7 @@
 
 #define TAG "waveshare_epaper_3_97"
 
+// Built with --language zh-CN (Chinese UI, wake word 你好小智), see .github/workflows/build.yml
 #define SHTC3_I2C_ADDR 0x70
 // The sensor sits next to the ESP32 and reads warm; Waveshare's demo subtracts 4°C.
 #define SHTC3_TEMP_OFFSET 4.0f
